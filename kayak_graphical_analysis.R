@@ -2,11 +2,15 @@ library(dplyr)
 library(ggplot2)
 library(RColorBrewer) 
 library(ggthemes)
-trim <- function (x) gsub("^\\s+|\\s+$", "", x)
+
 
 products <- read.csv("products.csv", stringsAsFactors = FALSE) 
 colnames(products)
 
+##################################################
+######### Pre-Processing Collected Data ##########
+##################################################
+# Uniform Kayak Length/Width
 for (i in 1:length(products$length)) {
   products$length[i] = ifelse(length(strsplit(products$length[i], split = " ")[[1]]) <= 2, 
                                          as.numeric(strsplit(products$length[i], split = ' ')[[1]][1]),
@@ -18,8 +22,7 @@ for (i in 1:length(products$width)) {
 products$length = as.numeric(products$length)
 products$width = as.numeric(products$width)
 
-
-#CHANGE 'Fishing, Flatwater Kayaking' and 'Flatwater Kayaking, Fishing' to be the same
+#Update 'Fishing, Flatwater Kayaking' and 'Flatwater Kayaking, Fishing' to be the same. Clean category names
 products = products %>% mutate(., type = ifelse(best_use == 'Fishing, Flatwater Kayaking'| best_use == 'Flatwater Kayaking, Fishing', 'Fishing/Flatwater', 
                                                 ifelse(best_use=='Fishing', 'Fishing', 
                                                        ifelse(best_use == 'Flatwater Kayaking', 'Flatwater' , 
@@ -27,36 +30,28 @@ products = products %>% mutate(., type = ifelse(best_use == 'Fishing, Flatwater 
                                                                      ifelse(best_use == 'Sea Kayaking', 'Sea', 
                                                                             ifelse(best_use == 'Whitewater Kayaking', 'Whitewater', NA)))))))
 
-#grouped by price
+#Categorize Price
 products = products %>% 
   mutate(., 'price_category' = ifelse(price >= 1500, 'Over 1500', 
                                       ifelse((price<1500 & price > 1000), "1000-1500", 
                                              ifelse((price > 500 & price <= 1000), '500-1000', 
                                                     ifelse(price <500, 'Less than 500', NA)))))
+# Save updates to a new file to use in Python
+write.csv(products, file='products_proc.csv', row.names=F)
+
+#######################################################
+########## Other Table Variations for Graphs ##########
+#######################################################
 
 #only rated products
 rated_products = products %>% filter(., Number_of_reviews > 0)
 
-
-#group by primary use
+## Group by Kayak Type
+#Average Rating by type
 rating_by_use = rated_products %>% group_by(., type) %>% summarise(., Average_Rating = sum(average_rating)/n(), total = n())
-
+# Average Price by Type
 price_by_type = products %>% group_by(., type) %>% summarize(., average_price = sum(price)/n())
-
-#group by dimensions
-
-products %>% 
-  group_by(., length) %>% 
-  summarize(., total = n()) %>% 
-  arrange(., desc(total))
-
-products %>% 
-  group_by(., width) %>% 
-  summarize(., total = n()) %>% 
-  arrange(., desc(total))
-
-#group by depth
-
+# Filter for products with depth and clean depth values
 products_with_depth = products %>% filter(., depth != "" & depth != "Unavailable")
 products_with_depth$depth
 for (i in 1:length(products_with_depth$depth)) {
@@ -70,25 +65,9 @@ products_with_depth %>%
 
 products_with_depth$depth = as.numeric(products_with_depth$width)
 
-#misc
-
-rated_products %>% arrange(., desc(Number_of_reviews))
-
-products %>% 
-  group_by(., tracking_system) %>% 
-  summarize(., total = n())
-
-products %>% 
-  group_by(., material) %>% 
-  summarize(., total = n())
-
-products %>% 
-  group_by(., weight) %>% 
-  summarize(., total = n()) %>% 
-  arrange(., desc(total))
-
-
-###charts
+############################
+########## GRAPHS ##########
+############################
 
 # Total Products by Type
 a = ggplot(products, aes(x=type)) +
@@ -137,6 +116,7 @@ d
   # website and b) there can be some bias because perhaps avid whitewater kayakers buy their kayaks from a retailer that specifically sells kayak supplies, not
   # just general outdoor supplies. 
 
+# Price Distributions by Kayak Type
 d2 =  ggplot(products) +
   geom_boxplot(aes(x = type, y = price, fill = type), show.legend = FALSE) + 
   ggtitle("Price Distributions by Kayak Type") +
@@ -160,7 +140,7 @@ e2 = ggplot(rated_products) +
   theme_stata() +
   scale_fill_stata()
 e2
-  ## Many of the kayaks are highly rated, recreational kayaks again have some significant outliers here/ Fishing/Flatwater is the least favorably rated. Notice
+  ## Many of the kayaks are highly rated, recreational kayaks again have some significant outliers here. Fishing/Flatwater is the least favorably rated. Notice
   # that whitewater is missing. The few whitewater kayaks on the market did not have reviews, lending support to my theory that whitewater kayaks may buy
   # their kayaks elsewhere.
 
@@ -184,17 +164,29 @@ g = ggplot(products_with_depth) +
   theme_bw()
 g
 
-  ## Disclaimer: not all products had a depth rating, so this specifically deals with a subset of the data. Depth, however, is the best measurement we have for
+  
+## Disclaimer: not all products had a depth rating, so this specifically deals with a subset of the data. Depth, however, is the best measurement we have for
   # a kayaks rocker. We can see a relationship here: as length increases, width decreases and depth also decreases. 
 
+# Price by Rating
+h = ggplot(products %>% filter(., average_rating > 0)) +
+  geom_point(aes(x = price, y = average_rating, color = type)) +
+  scale_color_brewer( palette = "Set1") +
+  ggtitle("Average Rating by Price") + 
+  scale_shape_manual(values = c(0, 15, 1, 16, 3, 17)) +
+  theme_bw()
+h
 
-
-#NUMERICAL EDA
-
-summary(products)
-
-#mean, median, mode, and variation for cont. variables
-
-# frequency tables for categorical variables
-
-ftable(table(products$type))
+# Total Reviews by Kayak Type
+i = ggplot(products %>% group_by(., type) %>% summarize(., Reviews = sum(Number_of_reviews)),aes(x = type, y = Reviews, fill = type)) +
+  geom_bar(stat = 'identity', show.legend = FALSE)+
+  ggtitle("Total Reviews by Kayak Type") +
+  theme_stata() +
+  scale_fill_stata()
+i
+#Histogram of Kayak Prices
+j = ggplot(data = products, aes(x=price))+
+  geom_histogram(bins = 45)+
+  ggtitle("Histogram of Kayak Prices") +
+  theme_bw()
+j
